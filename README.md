@@ -23,11 +23,11 @@ It allows users to add, view, analyze, and delete expenses — with interactive 
 
  Component  Technology Used 
 -----------------------------
- **Frontend/UI** - Streamlit 
- **Backend** - Python 
- **Database** - SQLite 
- **Visualization** - Plotly 
- **Machine Learning** - Scikit-learn 
+ - **Frontend/UI** - Streamlit 
+ - **Backend** - Python 
+ - **Database** - SQLite 
+ - **Visualization** - Plotly 
+ - **Machine Learning** - Scikit-learn 
 
 
 
