@@ -6,7 +6,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from contextlib import contextmanager
 import calendar
-import time 
+import time # Added for the delete success message delay
 
 # ---------- DATABASE UTILITIES ----------
 @contextmanager
@@ -64,15 +64,12 @@ def get_expense_summary():
     if df.empty:
         return None
     
-    # FIX: Explicitly ensure 'date' is datetime type, preventing AttributeError
-    df['date'] = pd.to_datetime(df['date'])
-    
     today = datetime.now()
     last_30_days = today - timedelta(days=30)
     last_7_days = today - timedelta(days=7)
     
     # Use to_period() for reliable month filtering
-    monthly_expenses = df[df['date'].dt.to_period('M') == today_to_period('M')]['amount'].sum()
+    monthly_expenses = df[df['date'].dt.to_period('M') == today.to_period('M')]['amount'].sum()
     last_30_days_expenses = df[df['date'] >= last_30_days]['amount'].sum()
     last_7_days_expenses = df[df['date'] >= last_7_days]['amount'].sum()
     
@@ -197,7 +194,7 @@ def create_spending_timeline(df):
     fig.update_layout(title='Cumulative Spending Timeline',
                       xaxis_title='Date',
                       yaxis_title='Amount (₹)',
-                      hovermode='x unified')
+                      hovermode='x unified') # Unified hover mode looks cleaner
     return fig
 
 # ---------- PAGE CONFIG ----------
@@ -261,7 +258,7 @@ st.markdown("""
             border-radius: 12px;
             border: 1px solid #475569;
             text-align: center;
-            /* FIX: ADDED FOR UNIFORM HEIGHT and ALIGNMENT */
+            /* FIX: ADDED FOR UNIFORM HEIGHT */
             min-height: 140px; 
             display: flex; 
             flex-direction: column;
@@ -319,8 +316,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------- PAGE LOGIC ----------
 if st.session_state.page == "Dashboard":
-    # FONT SIZE REDUCTION: Using st.subheader
-    st.subheader("📊 Expense Dashboard") 
+    st.header("📊 Expense Dashboard")
     
     df = get_all_expenses()
     summary = get_expense_summary()
@@ -416,7 +412,9 @@ if st.session_state.page == "Dashboard":
             st.plotly_chart(category_pie, use_container_width=True)
             st.markdown("</div>", unsafe_allow_html=True)
         
-        # Row 2: Category Bar and Daily Expense Chart 
+        # Row 2: Category Bar and Daily Expense Chart (Top charts in your image)
+        # We reuse col1, col2 = st.columns(2) to place the next charts immediately below 
+        # the previous row, eliminating the empty horizontal space.
         col1, col2 = st.columns(2) 
         
         with col1:
@@ -434,7 +432,8 @@ if st.session_state.page == "Dashboard":
                 st.info("No expenses in the last 30 days")
             st.markdown("</div>", unsafe_allow_html=True)
         
-        # Row 3: Advanced Charts 
+        # Row 3: Advanced Charts (Bottom charts in your image)
+        # We reuse col1, col2 = st.columns(2) to place the next charts immediately below.
         col1, col2 = st.columns(2)
         
         with col1:
@@ -591,4 +590,3 @@ elif st.session_state.page == "Delete Expense":
                         st.error("Error deleting expense. Please try again.")
     else:
         st.info("No expenses available to delete.")
-
