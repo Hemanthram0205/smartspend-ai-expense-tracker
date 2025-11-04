@@ -4,7 +4,6 @@
 It allows users to add, view, analyze, and delete expenses — with interactive dashboards and predictive insights.
 
 🔗 **Live App:** [smartspend-ai-expense-tracker-works.streamlit.app](https://smartspend-ai-expense-tracker-works.streamlit.app/)  
-📦 **GitHub Repository:** [Click Here](https://github.com/hemanthram/smartspend)
 
 
 
