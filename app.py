@@ -6,7 +6,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from contextlib import contextmanager
 import calendar
-import time # Added for the delete success message delay
+import time 
 
 # ---------- DATABASE UTILITIES ----------
 @contextmanager
@@ -63,6 +63,9 @@ def get_expense_summary():
     df = get_all_expenses()
     if df.empty:
         return None
+    
+    # FIX: Explicitly ensure 'date' is datetime type, preventing AttributeError
+    df['date'] = pd.to_datetime(df['date'])
     
     today = datetime.now()
     last_30_days = today - timedelta(days=30)
@@ -194,7 +197,7 @@ def create_spending_timeline(df):
     fig.update_layout(title='Cumulative Spending Timeline',
                       xaxis_title='Date',
                       yaxis_title='Amount (₹)',
-                      hovermode='x unified') # Unified hover mode looks cleaner
+                      hovermode='x unified')
     return fig
 
 # ---------- PAGE CONFIG ----------
@@ -258,7 +261,7 @@ st.markdown("""
             border-radius: 12px;
             border: 1px solid #475569;
             text-align: center;
-            /* FIX: ADDED FOR UNIFORM HEIGHT */
+            /* FIX: ADDED FOR UNIFORM HEIGHT and ALIGNMENT */
             min-height: 140px; 
             display: flex; 
             flex-direction: column;
@@ -316,7 +319,8 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------- PAGE LOGIC ----------
 if st.session_state.page == "Dashboard":
-    st.header("📊 Expense Dashboard")
+    # FONT SIZE REDUCTION: Using st.subheader
+    st.subheader("📊 Expense Dashboard") 
     
     df = get_all_expenses()
     summary = get_expense_summary()
@@ -412,9 +416,7 @@ if st.session_state.page == "Dashboard":
             st.plotly_chart(category_pie, use_container_width=True)
             st.markdown("</div>", unsafe_allow_html=True)
         
-        # Row 2: Category Bar and Daily Expense Chart (Top charts in your image)
-        # We reuse col1, col2 = st.columns(2) to place the next charts immediately below 
-        # the previous row, eliminating the empty horizontal space.
+        # Row 2: Category Bar and Daily Expense Chart 
         col1, col2 = st.columns(2) 
         
         with col1:
@@ -432,8 +434,7 @@ if st.session_state.page == "Dashboard":
                 st.info("No expenses in the last 30 days")
             st.markdown("</div>", unsafe_allow_html=True)
         
-        # Row 3: Advanced Charts (Bottom charts in your image)
-        # We reuse col1, col2 = st.columns(2) to place the next charts immediately below.
+        # Row 3: Advanced Charts 
         col1, col2 = st.columns(2)
         
         with col1:
