@@ -72,7 +72,7 @@ def get_expense_summary():
     last_7_days = today - timedelta(days=7)
     
     # Use to_period() for reliable month filtering
-    monthly_expenses = df[df['date'].dt.to_period('M') == today.to_period('M')]['amount'].sum()
+    monthly_expenses = df[df['date'].dt.to_period('M') == today_to_period('M')]['amount'].sum()
     last_30_days_expenses = df[df['date'] >= last_30_days]['amount'].sum()
     last_7_days_expenses = df[df['date'] >= last_7_days]['amount'].sum()
     
@@ -591,3 +591,4 @@ elif st.session_state.page == "Delete Expense":
                         st.error("Error deleting expense. Please try again.")
     else:
         st.info("No expenses available to delete.")
+
