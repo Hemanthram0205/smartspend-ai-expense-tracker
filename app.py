@@ -8,7 +8,6 @@ from contextlib import contextmanager
 import calendar
 import time 
 import hashlib
-import secrets
 
 # ---------- DATABASE UTILITIES ----------
 @contextmanager
@@ -22,18 +21,27 @@ def get_db_connection():
         conn.close()
 
 def init_db():
-    """Initialize database with proper schema"""
+    """Initialize database with proper schema and handle migrations"""
     with get_db_connection() as conn:
         c = conn.cursor()
-        # Expenses table
-        c.execute('''CREATE TABLE IF NOT EXISTS expenses
-                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                      category TEXT NOT NULL,
-                      amount REAL NOT NULL CHECK(amount >= 0),
-                      date TEXT NOT NULL,
-                      description TEXT,
-                      user_id INTEGER,
-                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        
+        # Check if expenses table exists and has user_id column
+        c.execute("PRAGMA table_info(expenses)")
+        columns = [column[1] for column in c.fetchall()]
+        
+        # Create expenses table if it doesn't exist
+        if 'expenses' not in [table[0] for table in c.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]:
+            c.execute('''CREATE TABLE expenses
+                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                          category TEXT NOT NULL,
+                          amount REAL NOT NULL CHECK(amount >= 0),
+                          date TEXT NOT NULL,
+                          description TEXT,
+                          user_id INTEGER,
+                          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        elif 'user_id' not in columns:
+            # Migrate existing table to add user_id column
+            c.execute('''ALTER TABLE expenses ADD COLUMN user_id INTEGER''')
         
         # Users table for authentication
         c.execute('''CREATE TABLE IF NOT EXISTS users
@@ -42,6 +50,10 @@ def init_db():
                       password_hash TEXT NOT NULL,
                       email TEXT,
                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        
+        # For existing data without user_id, assign to a default user (user_id = 1)
+        c.execute("UPDATE expenses SET user_id = 1 WHERE user_id IS NULL")
+        
         conn.commit()
 
 # ---------- AUTHENTICATION FUNCTIONS ----------
@@ -79,11 +91,15 @@ def authenticate_user(username, password):
 def get_current_user_expenses(user_id):
     """Get expenses for current user"""
     with get_db_connection() as conn:
-        df = pd.read_sql("SELECT * FROM expenses WHERE user_id = ? ORDER BY date DESC", 
-                        conn, params=(user_id,))
-        if not df.empty:
-            df['date'] = pd.to_datetime(df['date'])
-        return df
+        try:
+            df = pd.read_sql("SELECT * FROM expenses WHERE user_id = ? ORDER BY date DESC", 
+                            conn, params=(user_id,))
+            if not df.empty and 'date' in df.columns:
+                df['date'] = pd.to_datetime(df['date'])
+            return df
+        except Exception as e:
+            st.error(f"Error loading expenses: {str(e)}")
+            return pd.DataFrame()
 
 # ---------- DATA OPERATIONS ----------
 def add_expense(category, amount, expense_date, description, user_id):
@@ -108,7 +124,10 @@ def get_expense_summary(user_id):
     if df.empty:
         return None
     
-    # Ensure 'date' is datetime type
+    # Ensure 'date' is datetime type and handle potential missing columns
+    if 'date' not in df.columns:
+        return None
+        
     df['date'] = pd.to_datetime(df['date'])
     
     today = datetime.now()
@@ -144,7 +163,7 @@ def format_currency(amount):
 # ---------- CHART FUNCTIONS ----------
 def create_monthly_trend_chart(df):
     """Create monthly expense trend chart"""
-    if df.empty:
+    if df.empty or 'date' not in df.columns:
         return None
         
     monthly = df.groupby(df['date'].dt.to_period('M')).agg({'amount': 'sum', 'id': 'count'}).reset_index()
@@ -179,6 +198,9 @@ def create_category_pie_chart(df):
 
 def create_daily_expense_chart(df):
     """Create daily expense chart for last 30 days"""
+    if df.empty or 'date' not in df.columns:
+        return None
+        
     last_30_days = datetime.now() - timedelta(days=30)
     recent_expenses = df[df['date'] >= last_30_days]
     
@@ -216,7 +238,7 @@ def create_category_bar_chart(df):
 
 def create_expense_calendar_heatmap(df):
     """Create calendar heatmap of expenses"""
-    if df.empty:
+    if df.empty or 'date' not in df.columns:
         return None
         
     daily_expenses = df.groupby(df['date'].dt.date).agg({'amount': 'sum', 'id': 'count'}).reset_index()
@@ -233,7 +255,7 @@ def create_expense_calendar_heatmap(df):
 
 def create_spending_timeline(df):
     """Create cumulative spending timeline"""
-    if df.empty:
+    if df.empty or 'date' not in df.columns:
         return None
         
     df_sorted = df.sort_values('date')
@@ -410,18 +432,9 @@ def show_login_form():
             else:
                 st.error("Please fill in all fields")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Create Account"):
-            st.session_state.show_register = True
-            st.rerun()
-    with col2:
-        if st.button("Demo Login"):
-            # Demo account for testing
-            st.session_state.user_id = 1
-            st.session_state.username = "demo_user"
-            st.session_state.show_login = False
-            st.rerun()
+    if st.button("Create Account"):
+        st.session_state.show_register = True
+        st.rerun()
     
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -476,7 +489,7 @@ def show_main_app():
         st.markdown("---")
         st.markdown("### 💡 Quick Stats")
         df = get_current_user_expenses(st.session_state.user_id)
-        if not df.empty:
+        if not df.empty and 'amount' in df.columns:
             total = df['amount'].sum()
             count = len(df)
             st.metric("Total Expenses", format_currency(total))
@@ -522,7 +535,7 @@ def show_dashboard():
     df = get_current_user_expenses(st.session_state.user_id)
     summary = get_expense_summary(st.session_state.user_id)
     
-    if summary and not df.empty:
+    if summary and not df.empty and 'amount' in df.columns:
         st.subheader("📈 Key Metrics")
         
         # Row 1 of Metrics
@@ -706,7 +719,7 @@ def show_view_all():
     st.header("📋 All Expenses")
     
     df = get_current_user_expenses(st.session_state.user_id)
-    if not df.empty:
+    if not df.empty and 'amount' in df.columns:
         # Search and filter functionality
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -771,7 +784,7 @@ def show_delete_expense():
     st.header("❌ Delete Expense")
     
     df = get_current_user_expenses(st.session_state.user_id)
-    if not df.empty:
+    if not df.empty and 'amount' in df.columns:
         # Create a user-friendly selection
         df_display = df.copy()
         df_display['display'] = df_display.apply(
@@ -820,4 +833,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
