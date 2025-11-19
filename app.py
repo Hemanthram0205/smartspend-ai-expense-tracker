@@ -25,25 +25,7 @@ def init_db():
     with get_db_connection() as conn:
         c = conn.cursor()
         
-        # Check if expenses table exists and has user_id column
-        c.execute("PRAGMA table_info(expenses)")
-        columns = [column[1] for column in c.fetchall()]
-        
-        # Create expenses table if it doesn't exist
-        if 'expenses' not in [table[0] for table in c.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]:
-            c.execute('''CREATE TABLE expenses
-                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                          category TEXT NOT NULL,
-                          amount REAL NOT NULL CHECK(amount >= 0),
-                          date TEXT NOT NULL,
-                          description TEXT,
-                          user_id INTEGER,
-                          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-        elif 'user_id' not in columns:
-            # Migrate existing table to add user_id column
-            c.execute('''ALTER TABLE expenses ADD COLUMN user_id INTEGER''')
-        
-        # Users table for authentication
+        # Users table for authentication (create first)
         c.execute('''CREATE TABLE IF NOT EXISTS users
                      (id INTEGER PRIMARY KEY AUTOINCREMENT,
                       username TEXT UNIQUE NOT NULL,
@@ -51,8 +33,37 @@ def init_db():
                       email TEXT,
                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
         
-        # For existing data without user_id, assign to a default user (user_id = 1)
-        c.execute("UPDATE expenses SET user_id = 1 WHERE user_id IS NULL")
+        # Check if expenses table exists
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='expenses'")
+        table_exists = c.fetchone() is not None
+        
+        if not table_exists:
+            # Create fresh expenses table with user_id as NOT NULL
+            c.execute('''CREATE TABLE expenses
+                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                          category TEXT NOT NULL,
+                          amount REAL NOT NULL CHECK(amount >= 0),
+                          date TEXT NOT NULL,
+                          description TEXT,
+                          user_id INTEGER NOT NULL,
+                          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)''')
+        else:
+            # Check if user_id column exists
+            c.execute("PRAGMA table_info(expenses)")
+            columns = [column[1] for column in c.fetchall()]
+            
+            if 'user_id' not in columns:
+                # Add user_id column for migration
+                c.execute('''ALTER TABLE expenses ADD COLUMN user_id INTEGER''')
+                
+                # IMPORTANT: Only assign orphaned expenses to user_id=1 IF user_id=1 exists
+                c.execute("SELECT id FROM users WHERE id = 1")
+                if c.fetchone():
+                    c.execute("UPDATE expenses SET user_id = 1 WHERE user_id IS NULL")
+                else:
+                    # If no user exists, delete orphaned records (safer approach)
+                    c.execute("DELETE FROM expenses WHERE user_id IS NULL")
         
         conn.commit()
 
@@ -79,7 +90,7 @@ def create_user(username, password, email=None):
             return False
 
 def authenticate_user(username, password):
-    """Authenticate a user"""
+    """Authenticate a user and return user_id"""
     with get_db_connection() as conn:
         c = conn.cursor()
         c.execute("SELECT id, password_hash FROM users WHERE username = ?", (username,))
@@ -89,11 +100,15 @@ def authenticate_user(username, password):
         return None
 
 def get_current_user_expenses(user_id):
-    """Get expenses for current user"""
+    """Get expenses ONLY for the current user"""
     with get_db_connection() as conn:
         try:
-            df = pd.read_sql("SELECT * FROM expenses WHERE user_id = ? ORDER BY date DESC", 
-                            conn, params=(user_id,))
+            # CRITICAL: Always filter by user_id to ensure data isolation
+            df = pd.read_sql(
+                "SELECT * FROM expenses WHERE user_id = ? ORDER BY date DESC", 
+                conn, 
+                params=(user_id,)
+            )
             if not df.empty and 'date' in df.columns:
                 df['date'] = pd.to_datetime(df['date'])
             return df
@@ -103,28 +118,31 @@ def get_current_user_expenses(user_id):
 
 # ---------- DATA OPERATIONS ----------
 def add_expense(category, amount, expense_date, description, user_id):
-    """Add a new expense to the database"""
+    """Add a new expense to the database for specific user"""
     with get_db_connection() as conn:
         c = conn.cursor()
-        c.execute("INSERT INTO expenses (category, amount, date, description, user_id) VALUES (?, ?, ?, ?, ?)",
-                  (category.strip(), amount, expense_date.isoformat(), description.strip(), user_id))
+        # CRITICAL: Always include user_id when inserting
+        c.execute(
+            "INSERT INTO expenses (category, amount, date, description, user_id) VALUES (?, ?, ?, ?, ?)",
+            (category.strip(), amount, expense_date.isoformat(), description.strip(), user_id)
+        )
         conn.commit()
 
 def delete_expense(expense_id, user_id):
-    """Delete an expense by ID (with user verification)"""
+    """Delete an expense by ID - ONLY if it belongs to the user"""
     with get_db_connection() as conn:
         c = conn.cursor()
+        # CRITICAL: Verify ownership before deleting
         c.execute("DELETE FROM expenses WHERE id=? AND user_id=?", (expense_id, user_id))
         conn.commit()
         return c.rowcount > 0
 
 def get_expense_summary(user_id):
-    """Get comprehensive summary statistics for a user"""
+    """Get comprehensive summary statistics for a specific user"""
     df = get_current_user_expenses(user_id)
     if df.empty:
         return None
     
-    # Ensure 'date' is datetime type and handle potential missing columns
     if 'date' not in df.columns:
         return None
         
@@ -134,7 +152,6 @@ def get_expense_summary(user_id):
     last_30_days = today - timedelta(days=30)
     last_7_days = today - timedelta(days=7)
     
-    # FIX: Compare months and years to get current month expenses
     current_month_expenses = df[
         (df['date'].dt.month == today.month) & 
         (df['date'].dt.year == today.year)
@@ -265,14 +282,12 @@ def create_spending_timeline(df):
     
     fig = go.Figure()
     
-    # Add cumulative line
     fig.add_trace(go.Scatter(x=df_sorted['date'], y=df_sorted['cumulative_amount'],
                              mode='lines', name='Cumulative Spending',
                              line=dict(color='#3b82f6', width=3),
                              customdata=df_sorted['cumulative_formatted'],
                              hovertemplate='<b>%{x}</b><br>Cumulative: %{customdata}<extra></extra>'))
     
-    # Add individual expense points
     fig.add_trace(go.Scatter(x=df_sorted['date'], y=df_sorted['amount'],
                              mode='markers', name='Individual Expenses',
                              marker=dict(color='#ef4444', size=6),
@@ -396,6 +411,14 @@ st.markdown("""
             border-radius: 16px;
             border: 1px solid #475569;
         }
+        .isolation-badge {
+            background: #10b981;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: 600;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -497,7 +520,8 @@ def show_main_app():
     # User welcome message at top
     st.markdown(f"""
         <div class="user-welcome">
-            <h3>👋 Welcome back, <strong>{st.session_state.username}</strong>!</h3>
+            <h3>👋 Welcome back, <strong>{st.session_state.username}</strong>! 
+            <span class="isolation-badge">🔒 Your Private Space</span></h3>
         </div>
     """, unsafe_allow_html=True)
     
@@ -518,7 +542,6 @@ def show_main_app():
         if st.button("❌ Delete Expense", use_container_width=True):
             st.session_state.page = "Delete Expense"
     with col5:
-        # Logout button with custom styling
         if st.button("🚪 Logout", use_container_width=True, key="logout_main"):
             st.session_state.user_id = None
             st.session_state.username = None
@@ -688,157 +711,4 @@ def show_dashboard():
 
 def show_add_expense():
     """Show add expense page"""
-    st.header("➕ Add New Expense")
-    
-    with st.form("expense_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            category = st.selectbox(
-                "Category *",
-                ["Food", "Transport", "Entertainment", "Groceries", "Utilities", 
-                 "Healthcare", "Shopping", "Education", "Rent", "Travel", "Bills", "Other"]
-            )
-            amount = st.number_input("Amount (₹) *", min_value=0.0, step=1.0, format="%.2f")
-        
-        with col2:
-            expense_date = st.date_input("Date *", value=date.today())
-            description = st.text_area("Description", placeholder="Optional description")
-        
-        submitted = st.form_submit_button("💾 Save Expense", type="primary")
-        
-        if submitted:
-            if not category.strip():
-                st.error("Please enter a category")
-            elif amount <= 0:
-                st.error("Please enter a valid amount")
-            else:
-                try:
-                    add_expense(category, amount, expense_date, description, st.session_state.user_id)
-                    st.markdown("<div class='success-message'>✅ **Expense added successfully!**</div>", unsafe_allow_html=True)
-                    st.balloons()
-                    time.sleep(2)
-                    st.session_state.page = "Dashboard"
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error adding expense: {str(e)}")
-
-def show_view_all():
-    """Show view all expenses page"""
-    st.header("📋 All Expenses")
-    
-    df = get_current_user_expenses(st.session_state.user_id)
-    if not df.empty and 'amount' in df.columns:
-        # Search and filter functionality
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            search_term = st.text_input("🔍 Search by category or description")
-        with col2:
-            date_filter = st.selectbox("Filter by", ["All time", "Last 30 days", "Last 90 days", "This month"])
-        with col3:
-            category_filter = st.selectbox("Category filter", ["All categories"] + list(df['category'].unique()))
-        
-        # Apply filters
-        filtered_df = df.copy()
-        if search_term:
-            filtered_df = filtered_df[
-                filtered_df['category'].str.contains(search_term, case=False, na=False) |
-                filtered_df['description'].str.contains(search_term, case=False, na=False)
-            ]
-        
-        if date_filter == "Last 30 days":
-            cutoff_date = datetime.now() - timedelta(days=30)
-            filtered_df = filtered_df[filtered_df['date'] >= cutoff_date]
-        elif date_filter == "Last 90 days":
-            cutoff_date = datetime.now() - timedelta(days=90)
-            filtered_df = filtered_df[filtered_df['date'] >= cutoff_date]
-        elif date_filter == "This month":
-            current_month = datetime.now().replace(day=1)
-            filtered_df = filtered_df[filtered_df['date'] >= current_month]
-        
-        if category_filter != "All categories":
-            filtered_df = filtered_df[filtered_df['category'] == category_filter]
-        
-        # Display summary
-        total_filtered = filtered_df['amount'].sum()
-        st.metric("Total Filtered Expenses", format_currency(total_filtered))
-        
-        # Display data
-        display_df = filtered_df[['id', 'category', 'amount', 'date', 'description']].copy()
-        display_df['amount'] = display_df['amount'].apply(lambda x: f"₹{x:,.2f}")
-        display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d')
-        
-        st.dataframe(
-            display_df.rename(
-                columns={'id': 'ID', 'category': 'Category', 'amount': 'Amount', 
-                         'date': 'Date', 'description': 'Description'}
-            ),
-            use_container_width=True,
-            hide_index=True
-        )
-        
-        # Export option
-        csv_data = filtered_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Export to CSV",
-            data=csv_data,
-            file_name=f"expenses_{date.today()}.csv",
-            mime="text/csv"
-        )
-    else:
-        st.info("No expenses found. Add some expenses to see them here!")
-
-def show_delete_expense():
-    """Show delete expense page"""
-    st.header("❌ Delete Expense")
-    
-    df = get_current_user_expenses(st.session_state.user_id)
-    if not df.empty and 'amount' in df.columns:
-        # Create a user-friendly selection
-        df_display = df.copy()
-        df_display['display'] = df_display.apply(
-            lambda x: f"ID: {x['id']} | {x['date'].strftime('%Y-%m-%d')} | {x['category']} | ₹{x['amount']:,.2f}", 
-            axis=1
-        )
-        
-        expense_to_delete = st.selectbox(
-            "Select expense to delete:",
-            options=df_display['id'].tolist(),
-            format_func=lambda x: df_display[df_display['id'] == x]['display'].iloc[0]
-        )
-        
-        if expense_to_delete:
-            selected_expense = df[df['id'] == expense_to_delete].iloc[0]
-            
-            st.warning("⚠️ This action cannot be undone!")
-            st.info(f"""
-            **Expense Details:**
-            - **Category:** {selected_expense['category']}
-            - **Amount:** **{format_currency(selected_expense['amount'])}**
-            - **Date:** {selected_expense['date'].strftime('%Y-%m-%d')}
-            - **Description:** {selected_expense['description'] or 'N/A'}
-            """)
-            
-            col1, col2 = st.columns([1, 4])
-            with col1:
-                if st.button("🗑️ Confirm Delete", type="primary"):
-                    success = delete_expense(expense_to_delete, st.session_state.user_id)
-                    if success:
-                        st.markdown("<div class='success-message'>✅ **Expense deleted successfully!**</div>", unsafe_allow_html=True)
-                        time.sleep(1.5)
-                        st.rerun()
-                    else:
-                        st.error("Error deleting expense. Please try again.")
-    else:
-        st.info("No expenses available to delete.")
-
-# ---------- MAIN APP FLOW ----------
-def main():
-    """Main application flow"""
-    if st.session_state.user_id is None:
-        show_auth_page()
-    else:
-        show_main_app()
-
-if __name__ == "__main__":
-    main()
+    st.header("➕
