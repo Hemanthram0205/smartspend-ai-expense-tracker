@@ -8,7 +8,14 @@ from contextlib import contextmanager
 import calendar
 import time 
 import hashlib
-
+import os
+# ---------- APP CONFIGURATION ----------
+st.set_page_config(
+    page_title="SmartSpend - Expense Tracker", 
+    page_icon="💰", 
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 # ---------- DATABASE UTILITIES ----------
 @contextmanager
 def get_db_connection():
@@ -19,7 +26,6 @@ def get_db_connection():
         yield conn
     finally:
         conn.close()
-
 def init_db():
     """Initialize database with proper schema and handle migrations"""
     with get_db_connection() as conn:
@@ -66,16 +72,13 @@ def init_db():
                     c.execute("DELETE FROM expenses WHERE user_id IS NULL")
         
         conn.commit()
-
 # ---------- AUTHENTICATION FUNCTIONS ----------
 def hash_password(password):
     """Hash a password for storing."""
     return hashlib.sha256(password.encode()).hexdigest()
-
 def verify_password(password, password_hash):
     """Verify a stored password against one provided by user"""
     return hash_password(password) == password_hash
-
 def create_user(username, password, email=None):
     """Create a new user"""
     with get_db_connection() as conn:
@@ -88,7 +91,6 @@ def create_user(username, password, email=None):
             return True
         except sqlite3.IntegrityError:
             return False
-
 def authenticate_user(username, password):
     """Authenticate a user and return user_id"""
     with get_db_connection() as conn:
@@ -98,7 +100,6 @@ def authenticate_user(username, password):
         if user and verify_password(password, user['password_hash']):
             return user['id']
         return None
-
 def get_current_user_expenses(user_id):
     """Get expenses ONLY for the current user"""
     with get_db_connection() as conn:
@@ -115,7 +116,6 @@ def get_current_user_expenses(user_id):
         except Exception as e:
             st.error(f"Error loading expenses: {str(e)}")
             return pd.DataFrame()
-
 # ---------- DATA OPERATIONS ----------
 def add_expense(category, amount, expense_date, description, user_id):
     """Add a new expense to the database for specific user"""
@@ -127,7 +127,6 @@ def add_expense(category, amount, expense_date, description, user_id):
             (category.strip(), amount, expense_date.isoformat(), description.strip(), user_id)
         )
         conn.commit()
-
 def delete_expense(expense_id, user_id):
     """Delete an expense by ID - ONLY if it belongs to the user"""
     with get_db_connection() as conn:
@@ -136,7 +135,6 @@ def delete_expense(expense_id, user_id):
         c.execute("DELETE FROM expenses WHERE id=? AND user_id=?", (expense_id, user_id))
         conn.commit()
         return c.rowcount > 0
-
 def get_expense_summary(user_id):
     """Get comprehensive summary statistics for a specific user"""
     df = get_current_user_expenses(user_id)
@@ -172,11 +170,9 @@ def get_expense_summary(user_id):
         'daily_average': last_30_days_expenses / 30 if last_30_days_expenses else 0
     }
     return summary
-
 def format_currency(amount):
     """Format amount in Indian Rupees"""
     return f"₹{amount:,.2f}"
-
 # ---------- CHART FUNCTIONS ----------
 def create_monthly_trend_chart(df):
     """Create monthly expense trend chart"""
@@ -196,7 +192,6 @@ def create_monthly_trend_chart(df):
                       hovertemplate='<b>%{x}</b><br>Amount: %{customdata[0]}<br>Transactions: %{customdata[1]}<extra></extra>')
     fig.update_layout(hoverlabel=dict(bgcolor="white", font_size=12))
     return fig
-
 def create_category_pie_chart(df):
     """Create category-wise pie chart"""
     if df.empty:
@@ -212,7 +207,6 @@ def create_category_pie_chart(df):
                  custom_data=[category_totals['amount_formatted']])
     fig.update_traces(hovertemplate='<b>%{label}</b><br>Amount: %{customdata[0]}<br>Percentage: %{percent}<extra></extra>')
     return fig
-
 def create_daily_expense_chart(df):
     """Create daily expense chart for last 30 days"""
     if df.empty or 'date' not in df.columns:
@@ -234,7 +228,6 @@ def create_daily_expense_chart(df):
     fig.update_traces(marker_color='#10b981',
                       hovertemplate='<b>%{x}</b><br>Amount: %{customdata[0]}<extra></extra>')
     return fig
-
 def create_category_bar_chart(df):
     """Create horizontal bar chart for categories"""
     if df.empty:
@@ -252,7 +245,6 @@ def create_category_bar_chart(df):
     fig.update_traces(marker_color='#8b5cf6',
                       hovertemplate='<b>%{y}</b><br>Amount: %{customdata[0]}<extra></extra>')
     return fig
-
 def create_expense_calendar_heatmap(df):
     """Create calendar heatmap of expenses"""
     if df.empty or 'date' not in df.columns:
@@ -269,7 +261,6 @@ def create_expense_calendar_heatmap(df):
                                              'month': list(calendar.month_name[1:])},
                              color_continuous_scale="Blues")
     return fig
-
 def create_spending_timeline(df):
     """Create cumulative spending timeline"""
     if df.empty or 'date' not in df.columns:
@@ -299,15 +290,6 @@ def create_spending_timeline(df):
                       yaxis_title='Amount (₹)',
                       hovermode='x unified')
     return fig
-
-# ---------- PAGE CONFIG ----------
-st.set_page_config(
-    page_title="SmartSpend - Expense Tracker", 
-    page_icon="💰", 
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
-
 # ---------- CUSTOM CSS ----------
 st.markdown("""
     <style>
@@ -419,12 +401,30 @@ st.markdown("""
             font-size: 0.8em;
             font-weight: 600;
         }
+        .stTextInput > div > div > input, .stTextInput > div > div > textarea {
+            background-color: #374151 !important;
+            border-color: #4b5563 !important;
+            color: white !important;
+        }
+        .stSelectbox > div > div > select {
+            background-color: #374151 !important;
+            border-color: #4b5563 !important;
+            color: white !important;
+        }
+        .stDateInput > div > div > input {
+            background-color: #374151 !important;
+            border-color: #4b5563 !important;
+            color: white !important;
+        }
+        .stNumberInput > div > div > input {
+            background-color: #374151 !important;
+            border-color: #4b5563 !important;
+            color: white !important;
+        }
     </style>
 """, unsafe_allow_html=True)
-
 # ---------- INITIALIZATION ----------
 init_db()
-
 # ---------- SESSION STATE ----------
 if "page" not in st.session_state:
     st.session_state.page = "Dashboard"
@@ -436,7 +436,6 @@ if "show_login" not in st.session_state:
     st.session_state.show_login = True
 if "show_register" not in st.session_state:
     st.session_state.show_register = False
-
 # ---------- AUTHENTICATION PAGE ----------
 def show_auth_page():
     """Show authentication page (login/register)"""
@@ -446,15 +445,14 @@ def show_auth_page():
         show_register_form()
     else:
         show_login_form()
-
 def show_login_form():
     """Show login form"""
     st.markdown("<div class='auth-container'>", unsafe_allow_html=True)
     st.subheader("🔐 Login to SmartSpend")
     
     with st.form("login_form"):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
+        username = st.text_input("Username", key="login_username")
+        password = st.text_input("Password", type="password", key="login_password")
         submitted = st.form_submit_button("Login", type="primary")
         
         if submitted:
@@ -472,22 +470,21 @@ def show_login_form():
             else:
                 st.error("Please fill in all fields")
     
-    if st.button("Create Account"):
+    if st.button("Create Account", key="show_register_btn"):
         st.session_state.show_register = True
         st.rerun()
     
     st.markdown("</div>", unsafe_allow_html=True)
-
 def show_register_form():
     """Show registration form"""
     st.markdown("<div class='auth-container'>", unsafe_allow_html=True)
     st.subheader("🚀 Create Account")
     
     with st.form("register_form"):
-        username = st.text_input("Username")
-        email = st.text_input("Email (optional)")
-        password = st.text_input("Password", type="password")
-        confirm_password = st.text_input("Confirm Password", type="password")
+        username = st.text_input("Username", key="register_username")
+        email = st.text_input("Email (optional)", key="register_email")
+        password = st.text_input("Password", type="password", key="register_password")
+        confirm_password = st.text_input("Confirm Password", type="password", key="confirm_password")
         submitted = st.form_submit_button("Create Account", type="primary")
         
         if submitted:
@@ -508,12 +505,11 @@ def show_register_form():
             else:
                 st.error("Please fill in all required fields")
     
-    if st.button("← Back to Login"):
+    if st.button("← Back to Login", key="back_to_login"):
         st.session_state.show_register = False
         st.rerun()
     
     st.markdown("</div>", unsafe_allow_html=True)
-
 # ---------- MAIN APP ----------
 def show_main_app():
     """Show the main application after authentication"""
@@ -528,18 +524,17 @@ def show_main_app():
     # Navigation with logout button
     st.markdown("<div class='nav-container'>", unsafe_allow_html=True)
     col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
-
     with col1:
-        if st.button("📊 Dashboard", use_container_width=True):
+        if st.button("📊 Dashboard", use_container_width=True, key="nav_dashboard"):
             st.session_state.page = "Dashboard"
     with col2:
-        if st.button("➕ Add Expense", use_container_width=True):
+        if st.button("➕ Add Expense", use_container_width=True, key="nav_add"):
             st.session_state.page = "Add Expense"
     with col3:
-        if st.button("📋 View All", use_container_width=True):
+        if st.button("📋 View All", use_container_width=True, key="nav_view"):
             st.session_state.page = "View All"
     with col4:
-        if st.button("❌ Delete Expense", use_container_width=True):
+        if st.button("❌ Delete Expense", use_container_width=True, key="nav_delete"):
             st.session_state.page = "Delete Expense"
     with col5:
         if st.button("🚪 Logout", use_container_width=True, key="logout_main"):
@@ -547,9 +542,7 @@ def show_main_app():
             st.session_state.username = None
             st.session_state.show_login = True
             st.rerun()
-
     st.markdown("</div>", unsafe_allow_html=True)
-
     # Page Logic
     if st.session_state.page == "Dashboard":
         show_dashboard()
@@ -559,7 +552,6 @@ def show_main_app():
         show_view_all()
     elif st.session_state.page == "Delete Expense":
         show_delete_expense()
-
 def show_dashboard():
     """Show dashboard page"""
     st.subheader("📊 Expense Dashboard")
@@ -604,7 +596,6 @@ def show_dashboard():
                     <h2>{format_currency(summary['daily_average'])}</h2>
                 </div>
             """, unsafe_allow_html=True)
-
         # Row 2 of Metrics
         col1, col2, col3, col4 = st.columns(4)
         
@@ -708,7 +699,158 @@ def show_dashboard():
     
     else:
         st.info("🎯 No expenses recorded yet. Start by adding your first expense!")
-
+        
+        # Add first expense button
+        if st.button("➕ Add Your First Expense", type="primary"):
+            st.session_state.page = "Add Expense"
+            st.rerun()
 def show_add_expense():
     """Show add expense page"""
-    st.header("➕
+    st.subheader("➕ Add New Expense")
+    
+    with st.form("add_expense_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            category = st.selectbox("Category", 
+                                   ["Food", "Transportation", "Shopping", "Entertainment", 
+                                    "Bills", "Healthcare", "Education", "Travel", "Other"],
+                                   key="add_category")
+            amount = st.number_input("Amount (₹)", min_value=0.01, step=0.01, key="add_amount")
+        
+        with col2:
+            expense_date = st.date_input("Date", value=date.today(), key="add_date")
+            description = st.text_input("Description (optional)", key="add_description")
+        
+        submitted = st.form_submit_button("Add Expense", type="primary")
+        
+        if submitted:
+            if category and amount and expense_date:
+                try:
+                    add_expense(category, amount, expense_date, description, st.session_state.user_id)
+                    st.success("Expense added successfully!")
+                    time.sleep(1)
+                    st.session_state.page = "Dashboard"
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error adding expense: {str(e)}")
+            else:
+                st.error("Please fill in all required fields")
+    
+    if st.button("← Back to Dashboard", key="back_to_dashboard_add"):
+        st.session_state.page = "Dashboard"
+        st.rerun()
+def show_view_all():
+    """Show all expenses page"""
+    st.subheader("📋 All Expenses")
+    
+    df = get_current_user_expenses(st.session_state.user_id)
+    
+    if not df.empty:
+        # Export button
+        if st.button("📄 Export Data", key="export_data"):
+            csv = df.to_csv(index=False)
+            st.download_button(
+                label="Download CSV",
+                data=csv,
+                file_name=f"expenses_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
+        
+        # Filter options
+        col1, col2 = st.columns(2)
+        with col1:
+            selected_category = st.selectbox("Filter by Category", 
+                                           ["All"] + df['category'].unique().tolist(), 
+                                           key="filter_category")
+        with col2:
+            date_range = st.date_input("Filter by Date Range", 
+                                     value=[df['date'].min().date() if not df.empty else date.today(), 
+                                           df['date'].max().date() if not df.empty else date.today()],
+                                     key="filter_date_range")
+        
+        # Apply filters
+        filtered_df = df.copy()
+        if selected_category != "All":
+            filtered_df = filtered_df[filtered_df['category'] == selected_category]
+        
+        if len(date_range) == 2:
+            filtered_df = filtered_df[
+                (filtered_df['date'].dt.date >= date_range[0]) & 
+                (filtered_df['date'].dt.date <= date_range[1])
+            ]
+        
+        # Display table
+        st.dataframe(
+            filtered_df[['date', 'category', 'amount', 'description']].assign(
+                amount=filtered_df['amount'].apply(format_currency)
+            ),
+            use_container_width=True
+        )
+        
+        # Summary stats for filtered data
+        if not filtered_df.empty:
+            st.subheader("📊 Filtered Data Summary")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Amount", format_currency(filtered_df['amount'].sum()))
+            with col2:
+                st.metric("Transaction Count", len(filtered_df))
+            with col3:
+                st.metric("Average Amount", format_currency(filtered_df['amount'].mean()))
+    else:
+        st.info("No expenses to display")
+    
+    if st.button("← Back to Dashboard", key="back_to_dashboard_view"):
+        st.session_state.page = "Dashboard"
+        st.rerun()
+def show_delete_expense():
+    """Show delete expense page"""
+    st.subheader("❌ Delete Expense")
+    
+    df = get_current_user_expenses(st.session_state.user_id)
+    
+    if df.empty:
+        st.info("No expenses to delete")
+    else:
+        # Create options for selectbox
+        options = []
+        for _, row in df.iterrows():
+            date_str = row['date'].strftime('%d %b %Y')
+            options.append(f"{date_str} - {row['category']} - {format_currency(row['amount'])} ({row['description'][:30]}...)")
+        
+        selected_expense = st.selectbox("Select Expense to Delete", 
+                                       options, 
+                                       key="delete_expense_select")
+        
+        if selected_expense:
+            # Get the index of selected expense
+            selected_index = options.index(selected_expense)
+            expense_id = df.iloc[selected_index]['id']
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("❌ Delete Selected Expense", type="primary", key="confirm_delete"):
+                    if delete_expense(expense_id, st.session_state.user_id):
+                        st.success("Expense deleted successfully!")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("Error deleting expense")
+            
+            with col2:
+                if st.button("← Back to Dashboard", key="back_to_dashboard_delete"):
+                    st.rerun()
+    
+    if st.button("← Back to Dashboard", key="back_to_dashboard_delete_alt"):
+        st.session_state.page = "Dashboard"
+        st.rerun()
+# ---------- MAIN APP LOGIC ----------
+def main():
+    """Main application logic"""
+    if st.session_state.user_id is None:
+        show_auth_page()
+    else:
+        show_main_app()
+if __name__ == "__main__":
+    main()
